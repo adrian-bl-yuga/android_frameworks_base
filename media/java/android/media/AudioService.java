@@ -3935,6 +3935,11 @@ public class AudioService extends IAudioService.Stub {
 
         int connType = 0;
 
+        if (name.equals("usb_audio")) {
+            Log.v(TAG, "pabx: forcefully changing device "+device+" to DEVICE_OUT_USB_DEVICE");
+            device = AudioSystem.DEVICE_OUT_USB_DEVICE;
+        }
+
         if (device == AudioSystem.DEVICE_OUT_WIRED_HEADSET) {
             connType = AudioRoutesInfo.MAIN_HEADSET;
             intent.setAction(Intent.ACTION_HEADSET_PLUG);
@@ -3952,6 +3957,12 @@ public class AudioService extends IAudioService.Stub {
         } else if (device == AudioSystem.DEVICE_OUT_AUX_DIGITAL) {
             connType = AudioRoutesInfo.MAIN_HDMI;
             intent.setAction(Intent.ACTION_HDMI_AUDIO_PLUG);
+        } else if (device == AudioSystem.DEVICE_OUT_USB_DEVICE) {
+            Log.v(TAG, "pabx: using hardcoded alsa device 1,0 for usb audio on YUGA");
+            connType = AudioRoutesInfo.MAIN_DOCK_SPEAKERS; // ??
+            intent.setAction(Intent.ACTION_USB_AUDIO_ACCESSORY_PLUG);
+            intent.putExtra("card", 1);
+            intent.putExtra("device", 0);
         }
 
         synchronized (mCurAudioRoutes) {
