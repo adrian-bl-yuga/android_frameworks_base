@@ -1746,6 +1746,17 @@ public final class Settings {
         public static final String END_BUTTON_BEHAVIOR = "end_button_behavior";
 
         /**
+         * Enables or disables the volume rocker feature
+         * @hide
+         */
+        public static final String PABX_VOLUME_ROCKER = "pabx_volume_rocker";
+        /**
+         * Default value of volume rocker (= off)
+         * @hide
+         */
+        public static final int PABX_VOLUME_ROCKER_DEFAULT = 0;
+
+        /**
          * END_BUTTON_BEHAVIOR value for "go home".
          * @hide
          */

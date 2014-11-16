@@ -478,6 +478,9 @@ public class PhoneWindowManager implements WindowManagerPolicy {
     int mLockScreenTimeout;
     boolean mLockScreenTimerActive;
 
+    // volume rocker support
+    boolean mVolumeRocker;
+
     // Behavior of ENDCALL Button.  (See Settings.System.END_BUTTON_BEHAVIOR.)
     int mEndcallBehavior;
 
@@ -547,6 +550,7 @@ public class PhoneWindowManager implements WindowManagerPolicy {
     private static final int MSG_DISPATCH_SHOW_GLOBAL_ACTIONS = 10;
     private static final int MSG_HIDE_BOOT_MESSAGE = 11;
     private static final int MSG_LAUNCH_VOICE_ASSIST_WITH_WAKE_LOCK = 12;
+    private static final int MSG_DISPATCH_VOLKEY_WITH_WAKE_LOCK = 101;
 
     private class PolicyHandler extends Handler {
         @Override
@@ -588,6 +592,12 @@ public class PhoneWindowManager implements WindowManagerPolicy {
                 case MSG_LAUNCH_VOICE_ASSIST_WITH_WAKE_LOCK:
                     launchVoiceAssistWithWakeLock(msg.arg1 != 0);
                     break;
+                case MSG_DISPATCH_VOLKEY_WITH_WAKE_LOCK:
+                    KeyEvent mFakeKeyDown = new KeyEvent((KeyEvent)msg.obj);
+                    KeyEvent mFakeKeyUp = KeyEvent.changeAction(mFakeKeyDown, KeyEvent.ACTION_UP);
+                    dispatchMediaKeyWithWakeLockToAudioService(mFakeKeyDown);
+                    dispatchMediaKeyWithWakeLockToAudioService(mFakeKeyUp);
+                    break;
             }
         }
     }
@@ -612,6 +622,9 @@ public class PhoneWindowManager implements WindowManagerPolicy {
                     UserHandle.USER_ALL);
             resolver.registerContentObserver(Settings.Secure.getUriFor(
                     Settings.Secure.INCALL_POWER_BUTTON_BEHAVIOR), false, this,
+                    UserHandle.USER_ALL);
+            resolver.registerContentObserver(Settings.System.getUriFor(
+                    Settings.System.PABX_VOLUME_ROCKER), false, this,
                     UserHandle.USER_ALL);
             resolver.registerContentObserver(Settings.Secure.getUriFor(
                     Settings.Secure.WAKE_GESTURE_ENABLED), false, this,
@@ -1258,6 +1271,12 @@ public class PhoneWindowManager implements WindowManagerPolicy {
                     Settings.Secure.INCALL_POWER_BUTTON_BEHAVIOR,
                     Settings.Secure.INCALL_POWER_BUTTON_BEHAVIOR_DEFAULT,
                     UserHandle.USER_CURRENT);
+
+            // VolumeRocker
+            mVolumeRocker = Settings.System.getIntForUser(resolver,
+                    Settings.System.PABX_VOLUME_ROCKER,
+                    Settings.System.PABX_VOLUME_ROCKER_DEFAULT,
+                    UserHandle.USER_CURRENT) != Settings.System.PABX_VOLUME_ROCKER_DEFAULT;
 
             // Configure wake gesture.
             boolean wakeGestureEnabledSetting = Settings.Secure.getIntForUser(resolver,
@@ -4344,7 +4363,28 @@ public class PhoneWindowManager implements WindowManagerPolicy {
                             break;
                         }
                     }
+                }
 
+                if (mVolumeRocker && (result & ACTION_PASS_TO_USER) == 0 && keyCode != KeyEvent.KEYCODE_VOLUME_MUTE && !isScreenOn() && isMusicActive()) {
+                    boolean volIsPending = mHandler.hasMessages(MSG_DISPATCH_VOLKEY_WITH_WAKE_LOCK);
+                    mHandler.removeMessages(MSG_DISPATCH_VOLKEY_WITH_WAKE_LOCK);
+                    if(down) {
+                        int newKeyCode = (keyCode == KeyEvent.KEYCODE_VOLUME_UP ? KeyEvent.KEYCODE_MEDIA_NEXT : KeyEvent.KEYCODE_MEDIA_PREVIOUS);
+                        Message msg = mHandler.obtainMessage(MSG_DISPATCH_VOLKEY_WITH_WAKE_LOCK,
+                            new KeyEvent(event.getDownTime(), event.getEventTime(), event.getAction(), newKeyCode, 0));
+                        msg.setAsynchronous(true);
+                        mHandler.sendMessageDelayed(msg, ViewConfiguration.getLongPressTimeout());
+                        break; // consume this event
+                    } else if(volIsPending) {
+                        // This was not a down event but had a pending message: simulate volume button press
+                        MediaSessionLegacyHelper.getHelper(mContext)
+                                .sendVolumeKeyEvent(KeyEvent.changeAction(event, KeyEvent.ACTION_DOWN), true);
+                        MediaSessionLegacyHelper.getHelper(mContext)
+                                .sendVolumeKeyEvent(KeyEvent.changeAction(event, KeyEvent.ACTION_UP), true);
+                    } // else: up without pending -> nothing to do
+                }
+
+                if (down) {
                     if ((result & ACTION_PASS_TO_USER) == 0) {
                         // If we aren't passing to the user and no one else
                         // handled it send it to the session manager to figure
@@ -5603,6 +5643,14 @@ public class PhoneWindowManager implements WindowManagerPolicy {
                 updateOrientationListenerLp();
             }
         }
+    }
+
+    private boolean isMusicActive() {
+        final AudioManager am = (AudioManager)mContext.getSystemService(Context.AUDIO_SERVICE);
+        if (am == null) {
+            return false;
+        }
+        return am.isMusicActive();
     }
 
     private void performAuditoryFeedbackForAccessibilityIfNeed() {
